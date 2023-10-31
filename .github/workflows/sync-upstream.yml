@@ -1,0 +1,41 @@
+name: Sync All Branches from PingCAP TiDB
+
+on:
+  push:
+  schedule:
+    - cron: '0 0 * * *'  # 每天午夜执行
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v2
+      with:
+        fetch-depth: 0  # 确保完整的 git 历史被检出
+
+    - name: Set up Git user
+      run: |
+        git config user.email "xiabee@foxmail.com"
+        git config user.name "xiabee"
+
+    - name: Fetch all branches from upstream
+      run: |
+        git remote add upstream https://github.com/tikv/tikv.git
+        git fetch upstream
+
+    - name: Reset and force push each branch, excluding workflow files
+      run: |
+        for branch in $(git branch -r | grep 'upstream/' | grep -v 'HEAD' | sed 's/upstream\///'); do
+          ( # 使用一个子shell来处理每个分支，这样如果某个分支出现问题也不会影响整个循环
+            git checkout $branch || git checkout -b $branch
+            git fetch upstream $branch
+            git reset --hard upstream/$branch
+            git checkout HEAD .github/workflows/
+            # 仅在有更改时提交
+            if [[ $(git status --porcelain) ]]; then
+              git commit -m "Exclude changes to .github/workflows"
+              git push origin $branch --force
+            fi
+          ) || echo "Failed to process branch $branch"
+        done
