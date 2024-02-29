@@ -120,6 +120,10 @@ ENABLE_FEATURES += cloud-gcp
 ENABLE_FEATURES += cloud-azure
 endif
 
+ifneq ($(NO_ASYNC_BACKTRACE),1)
+ENABLE_FEATURES += trace-async-tasks
+endif
+
 export DOCKER_FILE ?= Dockerfile
 export DOCKER_IMAGE_NAME ?= pingcap/tikv
 export DOCKER_IMAGE_TAG ?= latest
@@ -360,8 +364,10 @@ pre-clippy: unset-override
 clippy: pre-clippy
 	@./scripts/check-redact-log
 	@./scripts/check-log-style
+	@./scripts/check-dashboards
 	@./scripts/check-docker-build
 	@./scripts/check-license
+	@./scripts/deny
 	@./scripts/clippy-all
 
 pre-audit:

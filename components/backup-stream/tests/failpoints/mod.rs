@@ -25,11 +25,38 @@ mod all {
         GetCheckpointResult, RegionCheckpointOperation, RegionSet, Task,
     };
     use futures::executor::block_on;
+    use raftstore::coprocessor::ObserveHandle;
     use tikv_util::{config::ReadableSize, defer};
 
     use super::{
         make_record_key, make_split_key_at_record, mutation, run_async_test, SuiteBuilder,
     };
+    use crate::make_table_key;
+
+    #[test]
+    fn failed_register_task() {
+        let suite = SuiteBuilder::new_named("failed_register_task").build();
+        fail::cfg("load_task::error_when_fetching_ranges", "return").unwrap();
+        let cli = suite.get_meta_cli();
+        block_on(cli.insert_task_with_range(
+            &suite.simple_task("failed_register_task"),
+            &[(&make_table_key(1, b""), &make_table_key(2, b""))],
+        ))
+        .unwrap();
+
+        for _ in 0..10 {
+            if block_on(cli.get_last_error_of("failed_register_task", 1))
+                .unwrap()
+                .is_some()
+            {
+                return;
+            }
+            std::thread::sleep(Duration::from_millis(100));
+        }
+
+        suite.dump_slash_etc();
+        panic!("No error uploaded when failed to comminate to PD.");
+    }
 
     #[test]
     fn basic() {
@@ -81,9 +108,11 @@ mod all {
         suite.run(|| {
             Task::ModifyObserve(backup_stream::ObserveOp::Start {
                 region: suite.cluster.get_region(&make_record_key(1, 886)),
+                handle: ObserveHandle::new(),
             })
         });
         fail::cfg("scan_after_get_snapshot", "off").unwrap();
+        std::thread::sleep(Duration::from_secs(1));
         suite.force_flush_files("frequent_initial_scan");
         suite.wait_for_flush();
         std::thread::sleep(Duration::from_secs(1));
@@ -151,6 +180,8 @@ mod all {
 
         suite.must_split(b"SOLE");
         let keys2 = run_async_test(suite.write_records(256, 128, 1));
+        // Let's make sure the retry has been triggered...
+        std::thread::sleep(Duration::from_secs(2));
         suite.force_flush_files("fail_to_refresh_region");
         suite.wait_for_flush();
         suite.check_for_write_records(
@@ -192,7 +223,8 @@ mod all {
         suite.must_split(&make_split_key_at_record(1, 42));
         std::thread::sleep(Duration::from_secs(2));
 
-        let error = run_async_test(suite.get_meta_cli().get_last_error("retry_abort", 1)).unwrap();
+        let error =
+            run_async_test(suite.get_meta_cli().get_last_error_of("retry_abort", 1)).unwrap();
         let error = error.expect("no error uploaded");
         error
             .get_error_message()
@@ -238,6 +270,8 @@ mod all {
         fail::cfg("try_start_observe", "2*return").unwrap();
         fail::cfg("try_start_observe0", "off").unwrap();
 
+        // Let's wait enough time for observing the split operation.
+        std::thread::sleep(Duration::from_secs(2));
         let round2 = run_async_test(suite.write_records(256, 128, 1));
         suite.force_flush_files("failure_and_split");
         suite.wait_for_flush();
@@ -257,7 +291,6 @@ mod all {
             .build();
         let keys = run_async_test(suite.write_records(0, 128, 1));
         let failed = Arc::new(AtomicBool::new(false));
-        fail::cfg("router_on_event_delay_ms", "6*return(1000)").unwrap();
         fail::cfg_callback("scan_and_async_send::about_to_consume", {
             let failed = failed.clone();
             move || {

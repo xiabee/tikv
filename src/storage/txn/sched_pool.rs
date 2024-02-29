@@ -13,8 +13,7 @@ use pd_client::{Feature, FeatureGate};
 use prometheus::local::*;
 use raftstore::store::WriteStats;
 use resource_control::{
-    priority_from_task_meta, with_resource_limiter, ControlledFuture, ResourceController,
-    ResourceGroupManager, TaskMetadata,
+    with_resource_limiter, ControlledFuture, ResourceController, ResourceGroupManager, TaskMetadata,
 };
 use tikv_util::{
     sys::SysQuota,
@@ -131,13 +130,7 @@ impl PriorityQueue {
         extras.set_metadata(metadata.to_vec());
         self.worker_pool.spawn_with_extras(
             with_resource_limiter(
-                ControlledFuture::new(
-                    async move {
-                        f.await;
-                    },
-                    self.resource_ctl.clone(),
-                    group_name,
-                ),
+                ControlledFuture::new(f, self.resource_ctl.clone(), group_name),
                 resource_limiter,
             ),
             extras,
@@ -194,8 +187,7 @@ impl SchedPool {
                     destroy_tls_engine::<E>();
                     tls_flush(&reporter);
                 })
-                .enable_task_wait_metrics()
-                .metric_idx_from_task_meta(Arc::new(priority_from_task_meta))
+                .enable_task_wait_metrics(true)
         };
         let vanilla = VanillaQueue {
             worker_pool: builder(pool_size, "sched-worker-pool").build_future_pool(),
@@ -283,7 +275,7 @@ pub fn tls_collect_scan_details(cmd: &'static str, stats: &Statistics) {
         m.borrow_mut()
             .local_scan_details
             .entry(cmd)
-            .or_insert_with(Default::default)
+            .or_default()
             .add(stats);
     });
 }
