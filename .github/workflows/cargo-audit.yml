@@ -1,9 +1,10 @@
-name: Security audit
+
+name: Rust Security Audi
 on:
-  push:
-    paths: 
-      - '**/Cargo.toml'
-      - '**/Cargo.lock'
+    push:
+        branches: [ master ]
+    pull_request:
+        branches: [ master ]
 jobs:
   security_audit:
     runs-on: ubuntu-latest
@@ -12,3 +13,24 @@ jobs:
       - uses: rustsec/audit-check@v1.4.1
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
+
+
+# jobs:
+#   security_audit:
+#     runs-on: ubuntu-latest
+#     steps:
+#     - uses: actions/checkout@v2
+#     - name: Install Rust
+#       uses: actions-rs/toolchain@v1
+#       with:
+#         toolchain: stable
+#         profile: minimal
+#         override: true
+
+#     - name: Install cargo-audit
+#       uses: actions-rs/audit-check@v1
+#       with:
+#         token: ${{ secrets.GITHUB_TOKEN }}
+
+#     - name: Run cargo-audit
+#       run: cargo audit
